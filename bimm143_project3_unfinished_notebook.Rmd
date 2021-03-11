@@ -1,0 +1,267 @@
+---
+title: "BIMM 143 Project 3"
+output: html_notebook
+---
+
+Intro: specific+measureable+clear scientific question. What will be the difference between CBD and THC interactions with microglia in their different immune activation states?
+
+Background info on the data: so "We're looking at Microarray data for Mus musculus BV-2 microglia cells in different conditions. These immune cells are activated with lipopolysaccharide (LPS), which is a pathogen-associated molecular pattern (PAMP) for bacterial infection. This study basically looks at the differential gene expression between these microglial cells with either THC or CBD added in with or without LPS-activation. 
+
+The main mode of effect for either cannabinoid will be the CB2 receptor, whose function is typically to increase microglia proliferation in anti-inflammatory way where they produce and release less inflammatory factors like TNFα and free radicals, downregulate certain viral-activated chemokine receptors, and increase release of beneficial factors like BDNF. I should also mention that microglia actually produce their own endocannabinoids (anandamide and 2-acylglycerol aka 2-AG), so some of this signaling is autocrine, so maybe using cannabinoids like THC and CBD as agonists will have some of the same effect as the endocannabinoids in that respect. 
+
+
+
+Importing packages we need for the code we're running. Quite a few of them but the most important ones have to do with our Gene Ontology (GO) and pathway analysis. org.Mm.eg.db, clusterProfiler, DOSE, rWikiPathways, RCy3 all are imports required for that. data.table, ggplot2, ggnewscale are all packages relevant to data selection and visualization, while dplyr is an all-around useful package for working with large datasets. 
+
+- Org.db are gene databases maintained by Bioconductor for model organisms with org.Mm.eg.db being the database for Mus musculus. 
+- clusterProfiler contains most of the gene ontology functions we use here
+- DOSE is a parent package to clusterProfiler, since the latter draws a ton of functionality from DOSE. 
+- rWikiPathways is a package for pathway enrichment, and towards the end I go through its functionality as well. 
+- data.table is the parent package to data.frame. Honestly I think I had to include it to solve a random error that popped up down the line, because I've never had to import it manually before now.
+- dplyr is a super useful function for selecting and manipulating dataframes. 
+
+```{r}
+library(data.table)
+library(org.Mm.eg.db)
+library(clusterProfiler)
+library(ggplot2)
+library(DOSE)
+#library(ggnewscale)
+library(dplyr)
+library(rWikiPathways)
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+In these next lines here, we import our data from Excel tables as dataframes. On my computer I set my working directory to Downloads; not sure if this will work for you if you don't have access to the original data. Anyways from there I just format the data: adding in column names and such (which I could've done via the header parameter but when I did so, the format of them was simply a bit of a mess). 
+
+```{r}
+# Upregulated genes
+upreg_genes <- read.csv(file = "FORMATTED_upregulated_genes - Copy - Copy.csv", header=FALSE,stringsAsFactors = FALSE)
+colnames(upreg_genes) <- c('geneName','geneDescription','RefSeqID','foldLPS','foldLPS_CBD','foldLPS_THC','foldCBD','foldTHC','log2LPS','log2LPS_CBD','log2LPS_THC','log2CBD','log2THC','CBD_effect2_LPS','THC_effect2_LPS')
+
+# Downregulated genes
+downreg_genes <- read.csv(file = "FORMATTED_downreg_genes.csv", header = FALSE, stringsAsFactors = FALSE)
+colnames(downreg_genes) <- c('geneName', 'geneDescription', 'RefSeqID','foldLPS','foldLPS_CBD','foldLPS_THC','foldCBD','foldTHC','log2LPS','log2LPS_CBD','log2LPS_THC','log2CBD','log2THC','CBD_effect2_LPS','THC_effect2_LPS')
+
+# Chopping some rows off of downreg_genes because the two empty rows I left in the Excel sheet were annoying me.
+downreg_genes <- downreg_genes[-c(1,2),] 
+```
+
+We have to use a regular expression here to chop off the version numbers from the RefSeq gene IDs because later GO functions just won't be able to process those. This gsub() function will change a gene ID from something like "NM_013653.1" to "NM_013653" for the Ccl5 gene. 
+
+```{r}
+upreg_genes$RefSeqID <- gsub(pattern = "\\.\\d", replacement = "", upreg_genes$RefSeqID)
+downreg_genes$RefSeqID <- gsub(pattern = "\\.\\d", replacement = "", downreg_genes$RefSeqID)
+```
+
+Now we get to talk about Gene IDs. I've had to learn way too much about these recently, so you get to join me in my suffering. There's a ton of ways to ID any one gene, between the various naming conventions, languages, inconsistent acronym usage, and of course whether we're talking DNA, mRNA or protein, even the specific country we're in --- it's just too much man. So bioinformaticians have made specific codes for each individual gene, and these follow various formats or 'keyTypes' depending on the database being used.
+
+If you're curious about these keyTypes, use this function below to find out how many there are just for mice.
+
+```{r}
+keytypes(org.Mm.eg.db)
+```
+
+
+NCBI and the paper I pull the microarray data from use RefSeq formats, and my GO packages require EntrezIDs, so I use and specifically the bitr() function within the clusterProfiler package to convert my gene lists. 
+
+So let's do that. 
+
+```{r}
+up.genes.entrez <- clusterProfiler::bitr(upreg_genes$RefSeqID, fromType = "REFSEQ", toType = "ENTREZID", OrgDb = org.Mm.eg.db, drop = FALSE)
+down.genes.entrez <- clusterProfiler::bitr(downreg_genes$RefSeqID,  fromType = "REFSEQ", toType = "ENTREZID", OrgDb = org.Mm.eg.db, drop = FALSE)
+```
+
+Now we have our dataframes for up and downregulated genes under the LPS-alone condition, as well as genelists in EntrezID formats to work with. Honestly, I should probably anneal this data to my dataframes, so maybe I'll do that later. 
+
+```{r}
+
+```
+
+Now it's time for the gene ontology itself. Here, we're using the clusterProfiler package again, but now it's the groupGO() function. This part also uses dependencies within the DOSE package for the geneList dataset. Also I'm sorting the data within each column before doing anything, although I don't remember 100% why that was necessary. 
+
+You can see the data output from this if you run the head() functions down below. 
+
+```{r}
+order(up.genes.entrez$ENTREZID, decreasing = TRUE)
+order(down.genes.entrez$ENTREZID, decreasing = TRUE)
+
+upreg_ggo <- clusterProfiler::groupGO(gene = up.genes.entrez$ENTREZID, OrgDb = org.Mm.eg.db)
+
+downreg_ggo <- clusterProfiler::groupGO(gene = down.genes.entrez$ENTREZID, OrgDb = org.Mm.eg.db)
+
+head(upreg_ggo)
+head(downreg_ggo)
+```
+
+At this point, we have our GO analysis mostly done, but we need to visualize it to be sure of what we have. So first we're going to make some quick barplots for each dataset. They do not show very much detail but they give us a general idea of the gene categories we're looking at. Also due to the way I did the gene ontologies, ie not separating the gene lists further by upreg/downreg in the various conditions, here we only have our original two categories of LPS-upregulated and LPS-downregulated. 
+
+```{r}
+barplot(upreg_ggo, showCategory = 100, title = "LPS-Upregulated Gene Ontology")
+barplot(downreg_ggo, showCategory = 100,title = "LPS-Downregulated Gene Ontology")
+```
+
+We can also make Gene Concept Networks, which are networks of genes and the various categories they might belong to. Here we can do one for all five experimental groups we have: LPS, LPS+CBD, LPS+THC, CBD, and THC. But first we're gonna convert our EntrezIDs to normal gene SYMBOLs using the setReadable() function within DOSE. Symbols are another keyType, however they're a lot more recognizable to anyone whose studied any genes before because they look like the simple acronyms we see in class and in research papers. 
+Eg. Il-6, Stat1 or NFkB.
+
+```{r}
+up_ggo <- setReadable(upreg_ggo, 'org.Mm.eg.db', 'ENTREZID')
+str(up_ggo)
+
+dn_ggo <- setReadable(downreg_ggo, 'org.Mm.eg.db', 'ENTREZID')
+str(dn_ggo)
+```
+
+Now we create the objects representing our gene concept networks. It's a lot of chunky code here and it'll take a lot of lines to write this out, but our main parameters are 1) the list of GO terms and 2) the vector of fold changes for each gene. Everything else is just set dressing for the visuals. Speaking of which, note to self: need to figure out how to add titles to these. 
+
+```{r}
+# Upreg genes first 
+up_genes_LPS <- cnetplot(up_ggo, foldChange = upreg_genes$foldLPS,
+                         colorEdge = TRUE,
+                         cex_gene = 1,cex_label_gene = .5,
+                         cex_label_category = .01,
+                         cex_category = .1)
+
+up_genes_LPS_CBD <- cnetplot(up_ggo, foldChange = upreg_genes$foldLPS_CBD,
+                         colorEdge = TRUE,
+                         cex_gene = 1,cex_label_gene = .5,
+                         cex_label_category = .01,
+                         cex_category = .1)
+
+up_genes_LPS_THC <- cnetplot(up_ggo, foldChange = upreg_genes$foldLPS_THC,
+                         colorEdge = TRUE,
+                         cex_gene = 1,cex_label_gene = .5,
+                         cex_label_category = .01,
+                         cex_category = .1)
+
+up_genes_CBD <- cnetplot(up_ggo, foldChange = upreg_genes$foldCBD,
+                         colorEdge = TRUE,
+                         cex_gene = 1,cex_label_gene = .5,
+                         cex_label_category = .01,
+                         cex_category = .1)
+
+up_genes_THC <- cnetplot(up_ggo, foldChange = upreg_genes$foldTHC,
+                         colorEdge = TRUE,
+                         cex_gene = 1,cex_label_gene = .5,
+                         cex_label_category = .01,
+                         cex_category = .1)
+
+
+# Downreg genes
+down_genes_LPS <- cnetplot(downreg_ggo, foldChange = downreg_genes$foldLPS,
+                           colorEdge = TRUE,
+                           cex_gene = 1,cex_label_gene = .5,
+                           cex_label_category = .01,
+                           cex_category = .1)
+
+down_genes_LPS_CBD <- cnetplot(up_ggo, foldChange = downreg_genes$foldLPS_CBD,
+                             colorEdge = TRUE,
+                             cex_gene = 1,cex_label_gene = .5,
+                             cex_label_category = .01,
+                             cex_category = .1)
+
+down_genes_LPS_THC <- cnetplot(up_ggo, foldChange = downreg_genes$foldLPS_THC,
+                             colorEdge = TRUE,
+                             cex_gene = 1,cex_label_gene = .5,
+                             cex_label_category = .01,
+                             cex_category = .1)
+
+down_genes_CBD <- cnetplot(downreg_ggo, foldChange = downreg_genes$foldCBD,
+                           colorEdge = TRUE,
+                           cex_gene = 1,cex_label_gene = .5,
+                           cex_label_category = .01,
+                           cex_category = .1)
+
+down_genes_THC <- cnetplot(downreg_ggo, foldChange = downreg_genes$foldTHC,
+                           colorEdge = TRUE,
+                           cex_gene = 1,cex_label_gene = .5,
+                           cex_label_category = .01,
+                           cex_category = .1)
+
+```
+
+We can look at the fruits of our hard labor by simply calling any one of these new cnet() objects we've created. These plots are honestly super cool so I recommend you go through each one individually. 
+
+```{r}
+up_genes_LPS
+up_genes_LPS_CBD
+up_genes_LPS_THC
+up_genes_CBD
+up_genes_THC
+
+down_genes_LPS
+down_genes_LPS_CBD
+down_genes_LPS_THC
+down_genes_CBD
+down_genes_THC
+```
+
+ANALYZE RESULTS HERE
+
+Technically my Project 3 is done at the visualization and analysis steps, but I'll take this a bit further before I conclude because the tutorial I followed went a few steps further and I already have the code worked out so might as well present it right? 
+
+First we're working with the rWikiPathways package for pathway enrichment. Step 1 is to download the pathway archive for Mus musculus, then collecting vectors of genes and names from the pathway archive. Then we're doing the pathway enrichment on this, but limiting to just the upregulated genes from here on out because this notebook is long enough as it is. 
+
+```{r}
+# --- Download Pathway Archive for Mus musculus
+
+wp.mm.gmt <- rWikiPathways::downloadPathwayArchive(organism = "Mus musculus", format = "gmt")
+wp2gene <- readPathwayGMT(wp.mm.gmt)
+
+# --- Select vectors of genes and names 
+wpid2gene <- wp2gene %>% dplyr::select(wpid,gene)
+wpid2name <- wp2gene %>% dplyr::select(wpid,name)
+
+# --- Pathway Enrichment based on Entrez ID 
+# ------- Upreg genes
+
+ewp.up.lps <- clusterProfiler::enricher(up.genes.entrez$ENTREZID,
+                                        TERM2GENE = wpid2gene, 
+                                        TERM2NAME = wpid2name)
+
+ewp.up.lps <- DOSE::setReadable(ewp.up.lps, org.Mm.eg.db, keyType = 'ENTREZID')
+
+head(ewp.up.lps@result)
+head(ewp.down.lps@result)
+ewp.down.lps@result
+```
+
+Now we get even more visuals from our pathway enrichment using a simple barplot. We could use ggplot here as well if we wanted by making ewp.up.lps into a dataframe with as.data.frame(). This gives us a bit more detail as well since GO only looks at one category per gene and pathway analysis looks at all pathways a particular gene is involved in. 
+
+```{r}
+# ------- Visualize with barplot
+barplot(ewp.up.lps, title = "LPS-Upregulated Pathways")
+barplot(ewp.down.lps, title = "LPS-Downregulated Pathways")
+
+```
+
+After that, we can do whatever we want with this massive, multiple hundred-kilobyte object of tables, geneIDs, p-values and all that. So here what I'm doing is showing how to select the results dataframe, and showing an example of how to find a pathway and a URL with more info about that pathway. We're using TNF signaling for an example, and the pathway URL it'll pull up will be about Spinal Cord Injury in Mus musculus.
+
+```{r}
+# Messing with rWikiPathways a bit 
+ewp.up.lps@result # Select the results dataframe from ewp.up.lps
+
+
+# Using TNF signaling as an example
+tnf.pathways <- findPathwayNamesByText("TNF")
+tnf.pathways <- as.data.frame(mapk.pathways) # Coerce results to dataframe
+
+
+# Grab our pathway IDs that we collected earlier
+holder1 <- grepl(pattern = "Tnf", ewp.up.lps@result$geneID)
+
+tnf.wpids.up.lps <- as.data.frame(ewp.up.lps@result$ID) %>% dplyr::filter(holder1)
+
+# Pull in a vector of URLs about our pathway of interest
+url.up.pathways <- getPathwayInfo(tnf.wpids.up.lps)$url 
+
+browseURL(url.up.pathways[1]) # Open a Wikipathways link in browser about this pathway
+```
+
+And that's that! At this point, all that's left is to link you some of the supplementary materials 
+
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
